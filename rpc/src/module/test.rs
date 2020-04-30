@@ -117,7 +117,7 @@ impl IntegrationTestRpc for IntegrationTestRpcImpl {
             .broadcast(NetworkProtocol::RELAY.into(), message.as_bytes())
         {
             error!("Broadcast transaction failed: {:?}", err);
-            Err(RPCError::custom(RPCError::Invalid, err.to_string()))
+            Err(RPCError::ckb_internal_error(err))
         } else {
             Ok(hash.unpack())
         }
