@@ -19,7 +19,7 @@ use std::{
     str,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    // time::Instant,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -61,7 +61,7 @@ impl PingHandler {
 
     fn ping_received(&self, id: SessionId) {
         trace!("received ping from: {:?}", id);
-        self.mark_time(id, None);
+        // self.mark_time(id, None);
     }
 
     fn ping_peers(&mut self, context: &ProtocolContext) {
@@ -92,16 +92,16 @@ impl PingHandler {
         }
     }
 
-    fn mark_time(&self, id: SessionId, ping_time: Option<Duration>) {
-        self.network_state.with_peer_registry_mut(|reg| {
-            if let Some(mut peer) = reg.get_peer_mut(id) {
-                if ping_time.is_some() {
-                    peer.ping = ping_time;
-                }
-                peer.last_message_time = Some(Instant::now());
-            }
-        });
-    }
+    // fn mark_time(&self, id: SessionId, ping_time: Option<Duration>) {
+    //     self.network_state.with_peer_registry_mut(|reg| {
+    //         if let Some(mut peer) = reg.get_peer_mut(id) {
+    //             if ping_time.is_some() {
+    //                 peer.ping = ping_time;
+    //             }
+    //             peer.last_message_time = Some(Instant::now());
+    //         }
+    //     });
+    // }
 }
 
 fn nonce(t: &SystemTime) -> u32 {
@@ -221,8 +221,8 @@ impl ServiceProtocol for PingHandler {
                         if let Some(status) = self.connected_session_ids.get_mut(&session.id) {
                             if (true, nonce) == (status.processing, status.nonce()) {
                                 status.processing = false;
-                                let ping_time = status.elapsed();
-                                self.mark_time(session.id, Some(ping_time));
+                                // let ping_time = status.elapsed();
+                                // self.mark_time(session.id, Some(ping_time));
                                 return;
                             }
                         }
