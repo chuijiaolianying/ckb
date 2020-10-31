@@ -1,27 +1,40 @@
+//! TODO(doc): @quake
 use ckb_db::RocksDB;
 use ckb_error::{Error, InternalErrorKind};
-use ckb_logger::info;
+use ckb_logger::{error, info};
+use console::Term;
+pub use indicatif::{HumanDuration, MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
+/// TODO(doc): @quake
 pub const VERSION_KEY: &[u8] = b"db-version";
 
 fn internal_error(reason: String) -> Error {
     InternalErrorKind::Database.reason(reason).into()
 }
 
+/// TODO(doc): @quake
 #[derive(Default)]
 pub struct Migrations {
-    migrations: Vec<Box<dyn Migration>>,
+    migrations: BTreeMap<String, Box<dyn Migration>>,
 }
 
 impl Migrations {
+    /// TODO(doc): @quake
     pub fn new() -> Self {
-        Migrations { migrations: vec![] }
+        Migrations {
+            migrations: BTreeMap::new(),
+        }
     }
 
+    /// TODO(doc): @quake
     pub fn add_migration(&mut self, migration: Box<dyn Migration>) {
-        self.migrations.push(migration);
+        self.migrations
+            .insert(migration.version().to_string(), migration);
     }
 
+    /// TODO(doc): @quake
     pub fn migrate(&self, mut db: RocksDB) -> Result<RocksDB, Error> {
         let db_version = db
             .get_pinned_default(VERSION_KEY)
@@ -33,19 +46,48 @@ impl Migrations {
             });
 
         match db_version {
-            Some(v) => {
-                for m in self.migrations.iter().filter(|m| m.version() > v.as_str()) {
-                    db = m.migrate(db)?;
-                    db.put(VERSION_KEY, m.version()).map_err(|err| {
+            Some(ref v) => {
+                info!("Current database version {}", v);
+                if let Some(m) = self.migrations.values().last() {
+                    if m.version() < v.as_str() {
+                        error!(
+                            "Database downgrade detected. \
+                            The database schema version is newer than client schema version,\
+                            please upgrade to the newer version"
+                        );
+                        return Err(internal_error(
+                            "Database downgrade is not supported".to_string(),
+                        ));
+                    }
+                }
+
+                let mpb = Arc::new(MultiProgress::new());
+                let migrations: BTreeMap<_, _> = self
+                    .migrations
+                    .iter()
+                    .filter(|(mv, _)| mv.as_str() > v.as_str())
+                    .collect();
+                let migrations_count = migrations.len();
+                for (idx, (_, m)) in migrations.iter().enumerate() {
+                    let mpbc = Arc::clone(&mpb);
+                    let pb = move |count: u64| -> ProgressBar {
+                        let pb = mpbc.add(ProgressBar::new(count));
+                        pb.set_draw_target(ProgressDrawTarget::to_term(Term::stdout(), None));
+                        pb.set_prefix(&format!("[{}/{}]", idx + 1, migrations_count));
+                        pb
+                    };
+                    db = m.migrate(db, Arc::new(pb))?;
+                    db.put_default(VERSION_KEY, m.version()).map_err(|err| {
                         internal_error(format!("failed to migrate the database: {}", err))
                     })?;
                 }
+                mpb.join_and_clear().expect("MultiProgress join");
                 Ok(db)
             }
             None => {
-                if let Some(m) = self.migrations.last() {
+                if let Some(m) = self.migrations.values().last() {
                     info!("Init database version {}", m.version());
-                    db.put(VERSION_KEY, m.version()).map_err(|err| {
+                    db.put_default(VERSION_KEY, m.version()).map_err(|err| {
                         internal_error(format!("failed to migrate the database: {}", err))
                     })?;
                 }
@@ -55,18 +97,26 @@ impl Migrations {
     }
 }
 
+/// TODO(doc): @quake
 pub trait Migration {
-    fn migrate(&self, _db: RocksDB) -> Result<RocksDB, Error>;
+    /// TODO(doc): @quake
+    fn migrate(
+        &self,
+        _db: RocksDB,
+        _pb: Arc<dyn Fn(u64) -> ProgressBar + Send + Sync>,
+    ) -> Result<RocksDB, Error>;
 
-    /// returns migration version, use `yyyymmddhhmmss` timestamp format
+    /// returns migration version, use `date +'%Y%m%d%H%M%S'` timestamp format
     fn version(&self) -> &str;
 }
 
+/// TODO(doc): @quake
 pub struct DefaultMigration {
     version: String,
 }
 
 impl DefaultMigration {
+    /// TODO(doc): @quake
     pub fn new(version: &str) -> Self {
         Self {
             version: version.to_string(),
@@ -75,7 +125,11 @@ impl DefaultMigration {
 }
 
 impl Migration for DefaultMigration {
-    fn migrate(&self, db: RocksDB) -> Result<RocksDB, Error> {
+    fn migrate(
+        &self,
+        db: RocksDB,
+        _pb: Arc<dyn Fn(u64) -> ProgressBar + Send + Sync>,
+    ) -> Result<RocksDB, Error> {
         Ok(db)
     }
 
@@ -127,7 +181,11 @@ mod tests {
         const VERSION: &str = "20191127101121";
 
         impl Migration for CustomizedMigration {
-            fn migrate(&self, db: RocksDB) -> Result<RocksDB, Error> {
+            fn migrate(
+                &self,
+                db: RocksDB,
+                _pb: Arc<dyn Fn(u64) -> ProgressBar + Send + Sync>,
+            ) -> Result<RocksDB, Error> {
                 let txn = db.transaction();
                 // append 1u8 to each value of column `0`
                 let migration = |key: &[u8], value: &[u8]| -> Result<(), Error> {

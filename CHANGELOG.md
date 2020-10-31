@@ -1,3 +1,97 @@
+# [v0.37.0](https://github.com/nervosnetwork/ckb/compare/v0.36.0...v0.37.0) (2020-10-20)
+
+### Features
+
+* #2270 **rpc:** Rework rpc doc (@doitian)
+* #2299: Add a default RocksDB options file (@yangby-cryptape)
+
+    The default options file limits the maximum memory usage.
+
+* #2276: Improve migration progress display (@zhangsoledad)
+* #2257 **rpc:** Add `ping_peers` rpc (@quake)
+* #2260 **rpc:** Add `get_transaction_proof` and `verify_transaction_proof` rpc (@quake)
+* #2259 **rpc:** Add `clear_banned_addresses` rpc (@quake)
+* #2265 **rpc:** Add `nMinimumChainWork` config (@driftluo)
+
+    The mainnet has been online for a long time, and it is time to add a minimum workload proof to prevent possible node attacks during the initial synchronization.
+
+* #2269: Redesign cell store (@zhangsoledad)
+
+    Previous cell storage is inefficient. This PR proposal a new live cell storage schema, which optimized the resolve transaction bottleneck.
+
+    Breaking Changes:
+
+    * This PR will migrate the database.
+    * The RPC `get_cells_by_lock_hash` is deprecated and now it only returns errors.
+
+* #2281 **rpc:** Add tx subscription RPC (@quake)
+
+    This PR added a `new_transaction` topic to subscription rpc, user will get notified when new transaction is submitted to pool.
+
+### Bug Fixes
+
+* #2285: Fix the problem of disconnection caused by uncertainty (@driftluo)
+* #2283: Resolve network background service cleanup issue when rpc tcp server is on (@quake)
+* #2298: Skip RUSTSEC-2020-0043 temporarily (@yangby-cryptape)
+
+### Improvements
+
+* #2236: Rewrite discovery (@driftluo)
+* #2303: Replace legacy crate `lru-cache` (@zhangsoledad)
+* #2282 **test:** Create log monitor for integration test check status between nodes (@chuijiaolianying)
+* #2286 **test:** Redesign the testing framework (@keroro520)
+* #2294 **test:** Redesign the way of Net communicate with peers (@keroro520)
+* #2268 **test:** Add some transaction checking utils (@keroro520)
+
+# [v0.36.0](https://github.com/nervosnetwork/ckb/compare/v0.35.0...v0.36.0) (2020-09-21)
+
+### Breaking Changes
+
+* #2251 **RPC:** Deprecated RPC method by adding `deprecated.` prefix to the rpc name (@quake)
+
+    This PR has also deprecated following RPC methods:
+
+    * `get_cells_by_lock_hash`
+    * All methods in the Indexer module.
+
+### Features
+
+* #2276: Improve database migration progress display (@zhangsoledad)
+* #2199: Add metrics service (@yangby-cryptape)
+
+    [How to enable the metrics service](https://github.com/nervosnetwork/ckb/blob/0db57dafaad73efbfcf5330ec289efba94fd6975/util/metrics-config/src/lib.rs#L5-L22)
+
+* #2243: Refactor identify network protocol by removing `Both` (@driftluo)
+* #2239: Support to control memory usage for header map (@yangby-cryptape)
+* #2248: Add verbosity param to chain related rpc (@quake)
+
+    This PR adds an optional `verbosity ` param to chain related rpc, returns data in hex format without calculated hash values, it will improve performance in some scenarios.
+
+### Bug Fixes
+
+* #2283: Resolve network background service cleanup issue when rpc tcp server is on. (@quake)
+* #2266: Use forked metrics and forked sentry to fix RUSTSEC-2020-0041 temporarily (@yangby-cryptape)
+* #2212: Advance last_common_header even the peer is worse than us (@keroro520)
+* #2238: Tx-pool block_on async oneshot (@zhangsoledad)
+
+    Replace crossbeam-channel with async oneshot
+
+* #2216: Integration test random failures (@quake)
+
+    While waiting for the `get_blocks` message in the integration test, we should determine whether the last block hash is equal or not.
+
+### Improvements
+
+* #2220: Split logger config and service (@yangby-cryptape)
+* #2213: Reduce useless field and reduce get time call (@driftluo)
+* #2245 **logger:** Replace lazy_static with once_cell (@zhangsoledad)
+* #2229: Rewrite the ping network protocol (@driftluo)
+* #2244: Re-export crossbeam-channel (@zhangsoledad)
+
+    Re-export crossbeam-channel from facade wrapper, unify version specify.
+
+    Use tilde requirements specify for crossbeam-channel, prevent automate dependency updates.
+
 # [v0.35.0](https://github.com/nervosnetwork/ckb/compare/v0.34.2...v0.35.0) (2020-08-24)
 
 ### Features

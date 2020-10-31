@@ -28,7 +28,7 @@ use ckb_util::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use ckb_verification::HeaderResolverWrapper;
 use failure::Error as FailureError;
 use faketime::unix_time_as_millis;
-use lru_cache::LruCache;
+use lru::LruCache;
 use std::cmp;
 use std::collections::{btree_map::Entry, BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -341,9 +341,14 @@ impl PeerState {
     }
 }
 
-#[derive(Default)]
 pub struct Filter<T: Eq + Hash> {
     inner: LruCache<T, ()>,
+}
+
+impl<T: Eq + Hash> Default for Filter<T> {
+    fn default() -> Self {
+        Filter::new(FILTER_SIZE)
+    }
 }
 
 impl<T: Eq + Hash> Filter<T> {
@@ -354,11 +359,11 @@ impl<T: Eq + Hash> Filter<T> {
     }
 
     pub fn contains(&self, item: &T) -> bool {
-        self.inner.contains_key(item)
+        self.inner.contains(item)
     }
 
     pub fn insert(&mut self, item: T) -> bool {
-        self.inner.insert(item, ()).is_none()
+        self.inner.put(item, ()).is_none()
     }
 }
 
@@ -374,7 +379,7 @@ impl KnownFilter {
     pub fn insert(&mut self, index: PeerIndex, hash: Byte32) -> bool {
         self.inner
             .entry(index)
-            .or_insert_with(|| Filter::new(FILTER_SIZE))
+            .or_insert_with(Filter::default)
             .insert(hash)
     }
 }
@@ -1168,6 +1173,7 @@ type PendingCompactBlockMap = HashMap<
     ),
 >;
 
+/// TODO(doc): @driftluo
 #[derive(Clone)]
 pub struct SyncShared {
     shared: Shared,
@@ -1175,10 +1181,12 @@ pub struct SyncShared {
 }
 
 impl SyncShared {
+    /// TODO(doc): @driftluo
     pub fn new(shared: Shared, sync_config: SyncConfig) -> SyncShared {
         Self::with_tmpdir::<PathBuf>(shared, sync_config, None)
     }
 
+    /// TODO(doc): @driftluo
     pub fn with_tmpdir<P>(shared: Shared, sync_config: SyncConfig, tmpdir: Option<P>) -> SyncShared
     where
         P: AsRef<Path>,
@@ -1224,10 +1232,12 @@ impl SyncShared {
         }
     }
 
+    /// TODO(doc): @driftluo
     pub fn shared(&self) -> &Shared {
         &self.shared
     }
 
+    /// TODO(doc): @driftluo
     pub fn active_chain(&self) -> ActiveChain {
         ActiveChain {
             shared: self.clone(),
@@ -1236,18 +1246,22 @@ impl SyncShared {
         }
     }
 
+    /// TODO(doc): @driftluo
     pub fn store(&self) -> &ChainDB {
         self.shared.store()
     }
 
+    /// TODO(doc): @driftluo
     pub fn state(&self) -> &SyncState {
         &self.state
     }
 
+    /// TODO(doc): @driftluo
     pub fn consensus(&self) -> &Consensus {
         self.shared.consensus()
     }
 
+    /// TODO(doc): @driftluo
     pub fn insert_new_block(
         &self,
         chain: &ChainController,
@@ -1277,6 +1291,7 @@ impl SyncShared {
         ret
     }
 
+    /// TODO(doc): @driftluo
     pub fn try_search_orphan_pool(&self, chain: &ChainController, parent_hash: &Byte32) {
         let descendants = self.state.remove_orphan_by_parent(parent_hash);
         debug!(
@@ -1332,6 +1347,7 @@ impl SyncShared {
         Ok(ret?)
     }
 
+    /// TODO(doc): @driftluo
     // Update the header_map
     // Update the block_status_map
     // Update the shared_best_header if need
@@ -1373,6 +1389,7 @@ impl SyncShared {
         self.state.may_set_shared_best_header(header_view);
     }
 
+    /// TODO(doc): @driftluo
     pub fn get_header_view(
         &self,
         hash: &Byte32,
@@ -1399,6 +1416,7 @@ impl SyncShared {
         }
     }
 
+    /// TODO(doc): @driftluo
     pub fn get_header(&self, hash: &Byte32) -> Option<core::HeaderView> {
         self.state
             .header_map
@@ -1407,12 +1425,14 @@ impl SyncShared {
             .or_else(|| self.store().get_block_header(hash))
     }
 
+    /// TODO(doc): @driftluo
     pub fn is_parent_stored(&self, block: &core::BlockView) -> bool {
         self.store()
             .get_block_header(&block.data().header().raw().parent_hash())
             .is_some()
     }
 
+    /// TODO(doc): @driftluo
     pub fn get_epoch_ext(&self, hash: &Byte32) -> Option<EpochExt> {
         self.store().get_block_epoch(&hash)
     }
@@ -1517,6 +1537,10 @@ impl SyncState {
         self.shared_best_header.read().to_owned()
     }
 
+    pub fn shared_best_header_ref(&self) -> RwLockReadGuard<HeaderView> {
+        self.shared_best_header.read()
+    }
+
     pub fn may_set_shared_best_header(&self, header: HeaderView) {
         if !header.is_better_than(&self.shared_best_header.read().total_difficulty()) {
             return;
@@ -1551,7 +1575,7 @@ impl SyncState {
         {
             let mut inflight_transactions = self.inflight_transactions.lock();
             for hash in hashes.iter() {
-                inflight_transactions.remove(&hash);
+                inflight_transactions.pop(hash);
             }
         }
 
@@ -1914,7 +1938,7 @@ impl ActiveChain {
             .state
             .pending_get_headers
             .write()
-            .get_refresh(&(peer, header.hash()))
+            .get(&(peer, header.hash()))
         {
             if Instant::now() < *last_time + GET_HEADERS_TIMEOUT {
                 debug!(
@@ -1932,7 +1956,7 @@ impl ActiveChain {
         self.state
             .pending_get_headers
             .write()
-            .insert((peer, header.hash()), Instant::now());
+            .put((peer, header.hash()), Instant::now());
 
         debug!(
             "send_getheaders_to_peer peer={}, hash={}",

@@ -22,7 +22,7 @@ use ckb_types::{
 use ckb_verification::cache::CacheEntry;
 use ckb_verification::{TimeRelativeTransactionVerifier, TransactionVerifier};
 use faketime::unix_time_as_millis;
-use lru_cache::LruCache;
+use lru::LruCache;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::{
@@ -30,7 +30,7 @@ use std::sync::{
     Arc,
 };
 
-#[derive(Clone)]
+/// TODO(doc): @zhangsoledad
 pub struct TxPool {
     pub(crate) config: TxPoolConfig,
     /// The short id that has not been proposed
@@ -51,22 +51,44 @@ pub struct TxPool {
     pub(crate) total_tx_size: usize,
     // sum of all tx_pool tx's cycles.
     pub(crate) total_tx_cycles: Cycle,
+    /// TODO(doc): @zhangsoledad
     pub snapshot: Arc<Snapshot>,
 }
 
+/// Transaction pool information.
 #[derive(Clone, Debug)]
 pub struct TxPoolInfo {
+    /// The associated chain tip block hash.
+    ///
+    /// Transaction pool is stateful. It manages the transactions which are valid to be commit
+    /// after this block.
     pub tip_hash: Byte32,
+    /// The block number of the block `tip_hash`.
     pub tip_number: BlockNumber,
+    /// Count of transactions in the pending state.
+    ///
+    /// The pending transactions must be proposed in a new block first.
     pub pending_size: usize,
+    /// Count of transactions in the proposed state.
+    ///
+    /// The proposed transactions are ready to be commit in the new block after the block
+    /// `tip_hash`.
     pub proposed_size: usize,
+    /// Count of orphan transactions.
+    ///
+    /// An orphan transaction has an input cell from the transaction which is neither in the chain
+    /// nor in the transaction pool.
     pub orphan_size: usize,
+    /// Total count of transactions in the pool of all the different kinds of states.
     pub total_tx_size: usize,
+    /// Total consumed VM cycles of all the transactions in the pool.
     pub total_tx_cycles: Cycle,
+    /// Last updated time. This is the Unix timestamp in milliseconds.
     pub last_txs_updated_at: u64,
 }
 
 impl TxPool {
+    /// TODO(doc): @zhangsoledad
     pub fn new(
         config: TxPoolConfig,
         snapshot: Arc<Snapshot>,
@@ -90,14 +112,17 @@ impl TxPool {
         }
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn cloned_snapshot(&self) -> Arc<Snapshot> {
         Arc::clone(&self.snapshot)
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn info(&self) -> TxPoolInfo {
         let tip_header = self.snapshot.tip_header();
         TxPoolInfo {
@@ -112,19 +137,23 @@ impl TxPool {
         }
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn reach_size_limit(&self, tx_size: usize) -> bool {
         (self.total_tx_size + tx_size) > self.config.max_mem_size
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn reach_cycles_limit(&self, cycles: Cycle) -> bool {
         (self.total_tx_cycles + cycles) > self.config.max_cycles
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn update_statics_for_add_tx(&mut self, tx_size: usize, cycles: Cycle) {
         self.total_tx_size += tx_size;
         self.total_tx_cycles += cycles;
     }
 
+    /// TODO(doc): @zhangsoledad
     // cycles overflow is possible, currently obtaining cycles is not accurate
     pub fn update_statics_for_remove_tx(&mut self, tx_size: usize, cycles: Cycle) {
         let total_tx_size = self.total_tx_size.checked_sub(tx_size).unwrap_or_else(|| {
@@ -145,6 +174,7 @@ impl TxPool {
         self.total_tx_cycles = total_tx_cycles;
     }
 
+    /// TODO(doc): @zhangsoledad
     // If did have this value present, false is returned.
     pub fn add_pending(&mut self, entry: TxEntry) -> Result<bool, Reject> {
         if self
@@ -157,12 +187,14 @@ impl TxPool {
         self.pending.add_entry(entry).map(|entry| entry.is_none())
     }
 
+    /// TODO(doc): @zhangsoledad
     // add_gap inserts proposed but still uncommittable transaction.
     pub fn add_gap(&mut self, entry: TxEntry) -> Result<bool, Reject> {
         trace!("add_gap {}", entry.transaction.hash());
         self.gap.add_entry(entry).map(|entry| entry.is_none())
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn add_proposed(&mut self, entry: TxEntry) -> Result<bool, Reject> {
         trace!("add_proposed {}", entry.transaction.hash());
         self.touch_last_txs_updated_at();
@@ -186,25 +218,29 @@ impl TxPool {
             .store(unix_time_as_millis(), Ordering::SeqCst);
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn get_last_txs_updated_at(&self) -> u64 {
         self.last_txs_updated_at.load(Ordering::SeqCst)
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn contains_proposal_id(&self, id: &ProposalShortId) -> bool {
         self.pending.contains_key(id)
-            || self.conflict.contains_key(id)
+            || self.conflict.contains(id)
             || self.proposed.contains_key(id)
             || self.orphan.contains_key(id)
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn contains_tx(&self, id: &ProposalShortId) -> bool {
         self.pending.contains_key(id)
             || self.gap.contains_key(id)
             || self.proposed.contains_key(id)
             || self.orphan.contains_key(id)
-            || self.conflict.contains_key(id)
+            || self.conflict.contains(id)
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn get_tx_with_cycles(
         &self,
         id: &ProposalShortId,
@@ -233,22 +269,24 @@ impl TxPool {
             })
             .or_else(|| {
                 self.conflict
-                    .get(id)
+                    .peek(id)
                     .cloned()
                     .map(|entry| (entry.transaction, entry.cache_entry.map(|c| c.cycles)))
             })
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn get_tx(&self, id: &ProposalShortId) -> Option<TransactionView> {
         self.pending
             .get_tx(id)
             .or_else(|| self.gap.get_tx(id))
             .or_else(|| self.proposed.get_tx(id))
             .or_else(|| self.orphan.get_tx(id))
-            .or_else(|| self.conflict.get(id).map(|e| &e.transaction))
+            .or_else(|| self.conflict.peek(id).map(|e| &e.transaction))
             .cloned()
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn get_tx_without_conflict(&self, id: &ProposalShortId) -> Option<TransactionView> {
         self.pending
             .get_tx(id)
@@ -258,17 +296,19 @@ impl TxPool {
             .cloned()
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn proposed(&self) -> &ProposedPool {
         &self.proposed
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn get_tx_from_proposed_and_others(&self, id: &ProposalShortId) -> Option<TransactionView> {
         self.proposed
             .get_tx(id)
             .or_else(|| self.gap.get_tx(id))
             .or_else(|| self.pending.get_tx(id))
             .or_else(|| self.orphan.get_tx(id))
-            .or_else(|| self.conflict.get(id).map(|e| &e.transaction))
+            .or_else(|| self.conflict.peek(id).map(|e| &e.transaction))
             .cloned()
     }
 
@@ -283,10 +323,11 @@ impl TxPool {
                 self.update_statics_for_remove_tx(entry.size, entry.cycles);
             }
             self.committed_txs_hash_cache
-                .insert(tx.proposal_short_id(), hash.to_owned());
+                .put(tx.proposal_short_id(), hash.to_owned());
         }
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn remove_expired<'a>(&mut self, ids: impl Iterator<Item = &'a ProposalShortId>) {
         for id in ids {
             for entry in self.gap.remove_entry_and_descendants(id) {
@@ -306,6 +347,7 @@ impl TxPool {
         self.snapshot().proposals().contains_proposed(short_id)
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn resolve_tx_from_pending_and_proposed(
         &self,
         tx: TransactionView,
@@ -324,6 +366,7 @@ impl TxPool {
         )
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn resolve_tx_from_proposed(
         &self,
         tx: TransactionView,
@@ -473,7 +516,7 @@ impl TxPool {
                             OutPointError::Dead(_) => {
                                 if self
                                     .conflict
-                                    .insert(short_id, DefectEntry::new(tx, 0, cache_entry, size))
+                                    .put(short_id, DefectEntry::new(tx, 0, cache_entry, size))
                                     .is_some()
                                 {
                                     self.update_statics_for_remove_tx(
@@ -668,6 +711,7 @@ impl TxPool {
         ret
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn get_proposals(
         &self,
         limit: usize,
@@ -682,6 +726,7 @@ impl TxPool {
         proposals
     }
 
+    /// TODO(doc): @zhangsoledad
     pub fn get_tx_from_pool_or_store(
         &self,
         proposal_id: &ProposalShortId,
@@ -689,7 +734,7 @@ impl TxPool {
         self.get_tx_from_proposed_and_others(proposal_id)
             .or_else(|| {
                 self.committed_txs_hash_cache
-                    .get(proposal_id)
+                    .peek(proposal_id)
                     .and_then(|tx_hash| self.snapshot().get_transaction(tx_hash).map(|(tx, _)| tx))
             })
     }

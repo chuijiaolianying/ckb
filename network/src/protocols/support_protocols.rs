@@ -6,19 +6,31 @@ use p2p::{
 };
 use tokio_util::codec::length_delimited;
 
+/// TODO(doc): @driftluo
+#[derive(Clone, Debug)]
 pub enum SupportProtocols {
+    /// TODO(doc): @driftluo
     Ping,
+    /// TODO(doc): @driftluo
     Discovery,
+    /// TODO(doc): @driftluo
     Identify,
+    /// TODO(doc): @driftluo
     Feeler,
+    /// TODO(doc): @driftluo
     DisconnectMessage,
+    /// TODO(doc): @driftluo
     Sync,
+    /// TODO(doc): @driftluo
     Relay,
+    /// TODO(doc): @driftluo
     Time,
+    /// TODO(doc): @driftluo
     Alert,
 }
 
 impl SupportProtocols {
+    /// TODO(doc): @driftluo
     pub fn protocol_id(&self) -> ProtocolId {
         match self {
             SupportProtocols::Ping => 0,
@@ -34,6 +46,7 @@ impl SupportProtocols {
         .into()
     }
 
+    /// TODO(doc): @driftluo
     pub fn name(&self) -> String {
         match self {
             SupportProtocols::Ping => "/ckb/ping",
@@ -49,6 +62,7 @@ impl SupportProtocols {
         .to_owned()
     }
 
+    /// TODO(doc): @driftluo
     pub fn support_versions(&self) -> Vec<String> {
         // we didn't invoke MetaBuilder#support_versions fn for these protocols (Ping/Discovery/Identify/Feeler/DisconnectMessage)
         // in previous code, so the default 0.0.1 value is used ( https://github.com/nervosnetwork/tentacle/blob/master/src/builder.rs#L312 )
@@ -66,6 +80,7 @@ impl SupportProtocols {
         }
     }
 
+    /// TODO(doc): @driftluo
     pub fn max_frame_length(&self) -> usize {
         match self {
             SupportProtocols::Ping => 1024,              // 1   KB
@@ -80,6 +95,7 @@ impl SupportProtocols {
         }
     }
 
+    /// TODO(doc): @driftluo
     pub fn flag(&self) -> BlockingFlag {
         match self {
             SupportProtocols::Ping
@@ -103,6 +119,7 @@ impl SupportProtocols {
         }
     }
 
+    /// TODO(doc): @driftluo
     // a helper fn to build `ProtocolMeta`
     pub fn build_meta_with_service_handle<
         SH: FnOnce() -> ProtocolHandle<Box<dyn ServiceProtocol + Send + 'static + Unpin>>,

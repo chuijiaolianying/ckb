@@ -54,8 +54,13 @@ doc-deps: ## Build the documentation for the local package and all dependencies.
 
 .PHONY: gen-rpc-doc
 gen-rpc-doc:  ## Generate rpc documentation
-	./devtools/doc/jsonfmt.py rpc/json/rpc.json
-	./devtools/doc/rpc.py rpc/json/rpc.json > rpc/README.md
+	rm -f target/doc/ckb_rpc/module/trait.*.html
+	cargo doc -p ckb-rpc -p ckb-types -p ckb-fixed-hash -p ckb-fixed-hash-core -p ckb-jsonrpc-types --no-deps
+	if command -v python3 &> /dev/null; then \
+		python3 ./devtools/doc/rpc.py > rpc/README.md; \
+	else \
+		python ./devtools/doc/rpc.py > rpc/README.md; \
+	fi
 
 .PHONY: gen-hashes
 gen-hashes: ## Generate docs/hashes.toml
@@ -114,20 +119,20 @@ fmt: setup-ckb-test ## Check Rust source code format to keep to the same style.
 
 .PHONY: clippy
 clippy: setup-ckb-test ## Run linter to examine Rust source codes.
-	cargo clippy ${VERBOSE} --all --all-targets --all-features -- ${CLIPPY_OPTS}
+	cargo clippy ${VERBOSE} --all --all-targets --all-features -- ${CLIPPY_OPTS} -D missing_docs
 	cd test && cargo clippy ${VERBOSE} --all --all-targets --all-features -- ${CLIPPY_OPTS}
 
 .PHONY: security-audit
-security-audit: ## Use cargo-audit to audit Cargo.lock for crates with security vulnerabilities.
-	# https://rustsec.org/advisories/RUSTSEC-2019-0031: spin is no longer actively maintained, it's not a problem
-	# https://rustsec.org/advisories/RUSTSEC-2020-0016: net2 has been deprecated, but still a lot of required crates are dependent on it
-	# https://rustsec.org/advisories/RUSTSEC-2020-0036: failure is officially deprecated/unmaintained, but still a lot of required crates are dependent on it
-	cargo audit \
-		--ignore RUSTSEC-2019-0031 \
-		--ignore RUSTSEC-2020-0016 \
-		--ignore RUSTSEC-2020-0036 \
-		--deny-warnings
-	# expecting to see "Success No vulnerable packages found"
+security-audit: ## Use cargo-deny to audit Cargo.lock for crates with security vulnerabilities.
+	cargo deny check --hide-inclusion-graph --show-stats advisories sources
+
+.PHONY: check-crates
+check-crates: ## Use cargo-deny to check specific crates, detect and handle multiple versions of the same crate and wildcards version requirement.
+	cargo deny check --hide-inclusion-graph --show-stats bans
+
+.PHONY: check-licenses
+check-licenses: ## Use cargo-deny to check licenses for all dependencies.
+	cargo deny check --hide-inclusion-graph --show-stats licenses
 
 .PHONY: bench-test
 bench-test:
@@ -137,7 +142,7 @@ bench-test:
 
 .PHONY: ci
 ci: ## Run recipes for CI.
-ci: fmt clippy test bench-test check-cargotoml check-whitespaces check-dirty-rpc-doc security-audit
+ci: fmt clippy test bench-test check-cargotoml check-whitespaces check-dirty-rpc-doc security-audit check-crates check-licenses
 	git diff --exit-code Cargo.lock
 
 .PHONY: check-cargotoml
@@ -150,7 +155,7 @@ check-whitespaces:
 
 .PHONY: check-dirty-rpc-doc
 check-dirty-rpc-doc: gen-rpc-doc
-	git diff --exit-code rpc/README.md rpc/json/rpc.json
+	git diff --exit-code rpc/README.md
 
 .PHONY: check-dirty-hashes-toml
 check-dirty-hashes-toml: gen-hashes
