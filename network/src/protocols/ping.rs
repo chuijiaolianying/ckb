@@ -1,14 +1,11 @@
 use crate::network::disconnect_with_message;
 use crate::NetworkState;
 use ckb_logger::{debug, error, trace, warn};
-use std::{
-    collections::HashMap,
-    str,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-use std::{sync::Arc, time::Instant};
-
 use ckb_types::{packed, prelude::*};
+use futures::{
+    channel::mpsc::{channel, Receiver, Sender},
+    prelude::*,
+};
 use p2p::{
     bytes::Bytes,
     context::{ProtocolContext, ProtocolContextMutRef},
@@ -16,9 +13,19 @@ use p2p::{
     traits::ServiceProtocol,
     SessionId,
 };
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    str,
+    sync::Arc,
+    task::{Context, Poll},
+    // time::Instant,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 const SEND_PING_TOKEN: u64 = 0;
 const CHECK_TIMEOUT_TOKEN: u64 = 1;
+const CONTROL_CHANNEL_BUFFER_SIZE: usize = 2;
 
 /// Ping protocol handler.
 ///
@@ -29,6 +36,7 @@ pub struct PingHandler {
     timeout: Duration,
     connected_session_ids: HashMap<SessionId, PingStatus>,
     network_state: Arc<NetworkState>,
+    control_receiver: Receiver<()>,
 }
 
 impl PingHandler {
@@ -36,31 +44,64 @@ impl PingHandler {
         interval: Duration,
         timeout: Duration,
         network_state: Arc<NetworkState>,
-    ) -> PingHandler {
-        PingHandler {
-            interval,
-            timeout,
-            connected_session_ids: Default::default(),
-            network_state,
+    ) -> (PingHandler, Sender<()>) {
+        let (control_sender, control_receiver) = channel(CONTROL_CHANNEL_BUFFER_SIZE);
+
+        (
+            PingHandler {
+                interval,
+                timeout,
+                connected_session_ids: Default::default(),
+                network_state,
+                control_receiver,
+            },
+            control_sender,
+        )
+    }
+
+    fn ping_received(&self, id: SessionId) {
+        trace!("received ping from: {:?}", id);
+        // self.mark_time(id, None);
+    }
+
+    fn ping_peers(&mut self, context: &ProtocolContext) {
+        let now = SystemTime::now();
+        let peers: Vec<SessionId> = self
+            .connected_session_ids
+            .iter_mut()
+            .filter_map(|(session_id, ps)| {
+                if ps.processing {
+                    None
+                } else {
+                    ps.processing = true;
+                    ps.last_ping = now;
+                    Some(*session_id)
+                }
+            })
+            .collect();
+        if !peers.is_empty() {
+            debug!("start ping peers: {:?}", peers);
+            let ping_msg = PingMessage::build_ping(nonce(&now));
+            let proto_id = context.proto_id;
+            if context
+                .filter_broadcast(TargetSession::Multi(peers), proto_id, ping_msg)
+                .is_err()
+            {
+                debug!("send message fail");
+            }
         }
     }
 
-    // received ping
-    fn ping(&self, id: SessionId) {
-        trace!("get ping from: {:?}", id);
-        self.mark_time(id, None);
-    }
-
-    fn mark_time(&self, id: SessionId, ping_time: Option<Duration>) {
-        self.network_state.with_peer_registry_mut(|reg| {
-            if let Some(mut peer) = reg.get_peer_mut(id) {
-                if ping_time.is_some() {
-                    peer.ping = ping_time;
-                }
-                peer.last_message_time = Some(Instant::now());
-            }
-        });
-    }
+    // fn mark_time(&self, id: SessionId, ping_time: Option<Duration>) {
+    //     self.network_state.with_peer_registry_mut(|reg| {
+    //         if let Some(mut peer) = reg.get_peer_mut(id) {
+    //             if ping_time.is_some() {
+    //                 peer.ping = ping_time;
+    //             }
+    //             peer.last_message_time = Some(Instant::now());
+    //         }
+    //     });
+    // }
 }
 
 fn nonce(t: &SystemTime) -> u32 {
@@ -167,7 +208,7 @@ impl ServiceProtocol for PingHandler {
             Some(msg) => {
                 match msg {
                     PingPayload::Ping(nonce) => {
-                        self.ping(session.id);
+                        self.ping_received(session.id);
                         if context
                             .send_message(PingMessage::build_pong(nonce))
                             .is_err()
@@ -180,8 +221,8 @@ impl ServiceProtocol for PingHandler {
                         if let Some(status) = self.connected_session_ids.get_mut(&session.id) {
                             if (true, nonce) == (status.processing, status.nonce()) {
                                 status.processing = false;
-                                let ping_time = status.elapsed();
-                                self.mark_time(session.id, Some(ping_time));
+                                // let ping_time = status.elapsed();
+                                // self.mark_time(session.id, Some(ping_time));
                                 return;
                             }
                         }
@@ -199,33 +240,7 @@ impl ServiceProtocol for PingHandler {
 
     fn notify(&mut self, context: &mut ProtocolContext, token: u64) {
         match token {
-            SEND_PING_TOKEN => {
-                let now = SystemTime::now();
-                let peers: Vec<SessionId> = self
-                    .connected_session_ids
-                    .iter_mut()
-                    .filter_map(|(session_id, ps)| {
-                        if ps.processing {
-                            None
-                        } else {
-                            ps.processing = true;
-                            ps.last_ping = now;
-                            Some(*session_id)
-                        }
-                    })
-                    .collect();
-                if !peers.is_empty() {
-                    debug!("start ping peers: {:?}", peers);
-                    let ping_msg = PingMessage::build_ping(nonce(&now));
-                    let proto_id = context.proto_id;
-                    if context
-                        .filter_broadcast(TargetSession::Multi(peers), proto_id, ping_msg)
-                        .is_err()
-                    {
-                        debug!("send message fail");
-                    }
-                }
-            }
+            SEND_PING_TOKEN => self.ping_peers(context),
             CHECK_TIMEOUT_TOKEN => {
                 let timeout = self.timeout;
                 for (id, _ps) in self
@@ -243,6 +258,20 @@ impl ServiceProtocol for PingHandler {
             }
             _ => panic!("unknown token {}", token),
         }
+    }
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        context: &mut ProtocolContext,
+    ) -> Poll<Option<()>> {
+        self.control_receiver
+            .poll_next_unpin(cx)
+            .map(|control_message| {
+                control_message.map(|_| {
+                    self.ping_peers(context);
+                })
+            })
     }
 }
 
